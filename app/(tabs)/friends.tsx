@@ -1,12 +1,14 @@
 import { Image } from "expo-image";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
-    Alert,
-    FlatList,
-    ScrollView,
-    StyleSheet,
-    TouchableOpacity,
-    View,
+  Alert,
+  FlatList,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
@@ -14,201 +16,219 @@ import { ThemedView } from "@/components/themed-view";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
 import {
-    acceptFriendRequest,
-    friendRequests,
-    getAllFriends,
-    getPendingFriendRequests,
-    getSentFriendRequests,
-    getUserById,
-    isUserFriend,
-    rejectFriendRequest,
-    removeFriend,
-    sendFriendRequest,
-    users
+  followUserAPI,
+  getFollowedUsersAPI,
+  isAuthenticated,
+  loadAuthData,
+  searchUserByEmailAPI,
+  unfollowUserAPI,
 } from "@/data";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+
+const showAlert = (title: string, message: string) => {
+  if (Platform.OS === "web") {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+};
 
 export default function FriendsScreen() {
   const colorScheme = useColorScheme();
   const [refresh, setRefresh] = useState(0);
   const [localFriends, setLocalFriends] = useState<any[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
-  const [sentRequests, setSentRequests] = useState<any[]>([]);
-  const [suggestedUsers, setSuggestedUsers] = useState<any[]>([]);
-  const [activeTab, setActiveTab] = useState<"friends" | "requests" | "add">(
-    "friends",
-  );
+  const [emailQuery, setEmailQuery] = useState<string>("");
+  const [foundUser, setFoundUser] = useState<any>(null);
+  const [activeTab, setActiveTab] = useState<"friends" | "add">("friends");
+
+  const updateData = async () => {
+    if (!isAuthenticated()) {
+      console.log("User not authenticated, skipping API calls");
+      return;
+    }
+
+    try {
+      const friendsRes = await getFollowedUsersAPI();
+      if (friendsRes.success) {
+        setLocalFriends(friendsRes.data);
+      } else {
+        console.log("Failed to fetch followed users:", friendsRes.error);
+      }
+    } catch (error) {
+      console.error("Error updating data:", error);
+    }
+  };
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      updateData();
-    }, 1000);
+    const initialize = async () => {
+      await loadAuthData();
+      await updateData();
+    };
+    initialize();
+  }, [refresh]);
 
-    return () => clearInterval(interval);
-  }, []);
+  const handleSearchByEmail = async () => {
+    setActiveTab("add");
+    if (emailQuery.trim() === "") {
+      setFoundUser(null);
+      return;
+    }
 
-  const updateData = () => {
-    const allFriends = getAllFriends();
-    setLocalFriends(allFriends);
+    const user = await searchUserByEmailAPI(emailQuery.trim());
+    setFoundUser(user || null);
+  };
 
-    const pending = getPendingFriendRequests();
-    setPendingRequests(
-      pending.map((r) => ({
-        ...r,
-        user: getUserById(r.fromUserId),
-      })),
-    );
-
-    const sent = getSentFriendRequests();
-    setSentRequests(
-      sent.map((r) => ({
-        ...r,
-        user: getUserById(r.toUserId),
-      })),
-    );
-
-    // Suggested users: users that are not friends and no pending request
-    const suggested = users.filter((user) => {
-      if (user.id === "me") return false;
-      if (isUserFriend(user.id)) return false;
-      const hasPending = friendRequests.some(
-        (r) =>
-          ((r.fromUserId === "me" && r.toUserId === user.id) ||
-            (r.fromUserId === user.id && r.toUserId === "me")) &&
-          r.status === "pending",
+  const handleFollow = async (userId: string) => {
+    try {
+      const res = await followUserAPI(String(userId));
+      if (res.success) {
+        showAlert("Thành công", "Bạn đang theo dõi người dùng này.");
+        if (foundUser) {
+          setLocalFriends((prev) => [...prev, foundUser]);
+        }
+        setRefresh((prev) => prev + 1);
+      } else {
+        showAlert("Lỗi", res.error || "Không thể theo dõi người dùng");
+      }
+    } catch (error) {
+      showAlert(
+        "Error",
+        `Network error: ${error instanceof Error ? error.message : "Unknown error"}.`,
       );
-      return !hasPending;
-    });
-    setSuggestedUsers(suggested);
+    }
   };
 
-  const handleSendRequest = (userId: string) => {
-    Alert.alert("Gửi lời mời", `Gửi lời mời kết bạn đến người dùng này?`, [
-      { text: "Hủy", style: "cancel" },
-      {
-        text: "Gửi",
-        onPress: () => {
-          sendFriendRequest(userId);
-          setRefresh(refresh + 1);
-        },
-      },
-    ]);
+  const handleUnfollow = async (userId: string) => {
+    console.log("👋 handleUnfollow called with userId:", userId);
+    const proceed =
+      Platform.OS === "web"
+        ? window.confirm("Bạn có chắc muốn hủy theo dõi người này?")
+        : await new Promise<boolean>((resolve) => {
+            Alert.alert(
+              "Hủy theo dõi",
+              "Bạn có chắc muốn hủy theo dõi người này?",
+              [
+                { text: "Hủy", style: "cancel", onPress: () => resolve(false) },
+                {
+                  text: "Hủy theo dõi",
+                  style: "destructive",
+                  onPress: () => resolve(true),
+                },
+              ],
+            );
+          });
+
+    console.log("✅ User confirmed:", proceed);
+    if (!proceed) {
+      console.log("❌ Unfollow cancelled by user");
+      return;
+    }
+
+    try {
+      console.log("🔄 Calling unfollowUserAPI...");
+      const res = await unfollowUserAPI(String(userId));
+      console.log("📦 API Response:", res);
+
+      if (res.success) {
+        showAlert("Thành công", "Bạn đã hủy theo dõi người này.");
+        setLocalFriends((prev) =>
+          prev.filter((friend) => String(friend.id) !== String(userId)),
+        );
+        setRefresh((prev) => prev + 1);
+      } else {
+        showAlert("Lỗi", res.error || "Không thể hủy theo dõi");
+      }
+    } catch (error) {
+      console.error("🔴 Caught error in handleUnfollow:", error);
+      showAlert(
+        "Lỗi",
+        `Lỗi mạng: ${error instanceof Error ? error.message : "Unknown error"}.`,
+      );
+    }
   };
 
-  const handleAcceptRequest = (requestId: string) => {
-    Alert.alert("Chấp nhận", "Chấp nhận lời mời kết bạn?", [
-      { text: "Hủy", style: "cancel" },
-      {
-        text: "Chấp nhận",
-        onPress: () => {
-          acceptFriendRequest(requestId);
-          setRefresh(refresh + 1);
-        },
-      },
-    ]);
-  };
+  const renderFriendItem = ({ item }: { item: any }) => {
+    const displayName =
+      item.first_name && item.last_name
+        ? `${item.first_name} ${item.last_name}`.trim()
+        : item.username;
 
-  const handleRejectRequest = (requestId: string) => {
-    Alert.alert("Từ chối", "Từ chối lời mời kết bạn?", [
-      { text: "Hủy", style: "cancel" },
-      {
-        text: "Từ chối",
-        onPress: () => {
-          rejectFriendRequest(requestId);
-          setRefresh(refresh + 1);
-        },
-      },
-    ]);
-  };
-
-  const handleRemoveFriend = (userId: string) => {
-    const user = getUserById(userId);
-    Alert.alert("Xóa bạn", `Xóa ${user?.name} khỏi danh sách bạn bè?`, [
-      { text: "Hủy", style: "cancel" },
-      {
-        text: "Xóa",
-        onPress: () => {
-          removeFriend(userId);
-          setRefresh(refresh + 1);
-        },
-      },
-    ]);
-  };
-
-  const renderFriendItem = ({ item }: { item: any }) => (
-    <ThemedView style={styles.friendItem}>
-      <View style={styles.friendContent}>
-        <Image source={{ uri: item.avatar }} style={styles.avatar} />
-        <View style={styles.friendInfo}>
-          <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-          <ThemedText style={styles.emailText}>{item.email}</ThemedText>
+    return (
+      <ThemedView style={styles.friendItem}>
+        <View style={styles.friendContent}>
+          <Image
+            source={{
+              uri:
+                item.avatar ||
+                "https://www.svgrepo.com/show/452030/avatar-default.svg",
+            }}
+            style={styles.avatar}
+          />
+          <View style={styles.friendInfo}>
+            <ThemedText type="defaultSemiBold">{displayName}</ThemedText>
+            <ThemedText style={styles.emailText}>{item.email}</ThemedText>
+          </View>
         </View>
-      </View>
-      <TouchableOpacity
-        onPress={() => handleRemoveFriend(item.id)}
-        style={styles.removeButton}
-      >
-        <IconSymbol name="xmark.circle.fill" size={24} color="#FF3B30" />
-      </TouchableOpacity>
-    </ThemedView>
-  );
-
-  const renderRequestItem = ({ item }: { item: any }) => (
-    <ThemedView style={styles.requestItem}>
-      <View style={styles.requestContent}>
-        <Image source={{ uri: item.user.avatar }} style={styles.avatar} />
-        <View style={styles.requestInfo}>
-          <ThemedText type="defaultSemiBold">{item.user.name}</ThemedText>
-          <ThemedText style={styles.emailText}>{item.user.email}</ThemedText>
-        </View>
-      </View>
-      <View style={styles.requestButtons}>
         <TouchableOpacity
-          onPress={() => handleAcceptRequest(item.id)}
-          style={styles.acceptButton}
-        >
-          <IconSymbol name="checkmark.circle.fill" size={24} color="#4CAF50" />
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => handleRejectRequest(item.id)}
-          style={styles.rejectButton}
+          onPress={() => handleUnfollow(item.id)}
+          style={styles.removeButton}
         >
           <IconSymbol name="xmark.circle.fill" size={24} color="#FF3B30" />
         </TouchableOpacity>
-      </View>
-    </ThemedView>
-  );
+      </ThemedView>
+    );
+  };
 
-  const renderSentRequestItem = ({ item }: { item: any }) => (
-    <ThemedView style={styles.sentRequestItem}>
-      <View style={styles.friendContent}>
-        <Image source={{ uri: item.user.avatar }} style={styles.avatar} />
-        <View style={styles.friendInfo}>
-          <ThemedText type="defaultSemiBold">{item.user.name}</ThemedText>
-          <ThemedText style={styles.emailText}>{item.user.email}</ThemedText>
-          <ThemedText style={styles.pendingText}>⏳ Chờ phản hồi</ThemedText>
-        </View>
-      </View>
-    </ThemedView>
-  );
+  const renderFoundUser = () => {
+    if (!foundUser) {
+      return null;
+    }
 
-  const renderSuggestedUser = ({ item }: { item: any }) => (
-    <ThemedView style={styles.suggestedItem}>
-      <View style={styles.friendContent}>
-        <Image source={{ uri: item.avatar }} style={styles.avatar} />
-        <View style={styles.friendInfo}>
-          <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-          <ThemedText style={styles.emailText}>{item.email}</ThemedText>
+    const displayName =
+      foundUser.first_name && foundUser.last_name
+        ? `${foundUser.first_name} ${foundUser.last_name}`.trim()
+        : foundUser.username || foundUser.email || "Người dùng";
+
+    const isFollowing = localFriends.some(
+      (friend) => String(friend.id) === String(foundUser.id),
+    );
+
+    return (
+      <ThemedView style={styles.suggestedItem}>
+        <View style={styles.friendContent}>
+          <Image
+            source={{
+              uri:
+                foundUser.avatar ||
+                "https://www.svgrepo.com/show/452030/avatar-default.svg",
+            }}
+            style={styles.avatar}
+          />
+          <View style={styles.friendInfo}>
+            <ThemedText type="defaultSemiBold">{displayName}</ThemedText>
+            <ThemedText style={styles.emailText}>{foundUser.email}</ThemedText>
+          </View>
         </View>
-      </View>
-      <TouchableOpacity
-        onPress={() => handleSendRequest(item.id)}
-        style={styles.addButton}
-      >
-        <IconSymbol name="plus.circle.fill" size={24} color="#007AFF" />
-      </TouchableOpacity>
-    </ThemedView>
-  );
+        <TouchableOpacity
+          onPress={() =>
+            isFollowing
+              ? handleUnfollow(foundUser.id)
+              : handleFollow(foundUser.id)
+          }
+          style={styles.addButton}
+        >
+          <IconSymbol
+            name={isFollowing ? "xmark.circle.fill" : "plus.circle.fill"}
+            size={24}
+            color={isFollowing ? "#FF3B30" : "#d56123"}
+          />
+          <ThemedText style={styles.addButtonText}>
+            {isFollowing ? "Unfollow" : "Follow"}
+          </ThemedText>
+        </TouchableOpacity>
+      </ThemedView>
+    );
+  };
 
   return (
     <ScrollView
@@ -220,14 +240,12 @@ export default function FriendsScreen() {
       ]}
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
       <View style={styles.header}>
         <ThemedText type="title" style={styles.headerTitle}>
-          Bạn bè
+          Theo dõi
         </ThemedText>
       </View>
 
-      {/* Tabs */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tab, activeTab === "friends" && styles.activeTab]}
@@ -239,20 +257,7 @@ export default function FriendsScreen() {
               activeTab === "friends" && styles.activeTabText,
             ]}
           >
-            Bạn bè ({localFriends.length})
-          </ThemedText>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "requests" && styles.activeTab]}
-          onPress={() => setActiveTab("requests")}
-        >
-          <ThemedText
-            style={[
-              styles.tabText,
-              activeTab === "requests" && styles.activeTabText,
-            ]}
-          >
-            Lời mời ({pendingRequests.length})
+            Đang theo dõi ({localFriends.length})
           </ThemedText>
         </TouchableOpacity>
         <TouchableOpacity
@@ -270,58 +275,19 @@ export default function FriendsScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Content */}
       {activeTab === "friends" && (
         <ThemedView style={styles.section}>
           {localFriends.length > 0 ? (
             <FlatList
               data={localFriends}
               renderItem={renderFriendItem}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => String(item.id)}
               extraData={refresh}
               scrollEnabled={false}
             />
           ) : (
             <ThemedText style={styles.emptyText}>
-              Bạn chưa có bạn bè nào. Hãy thêm bạn bè!
-            </ThemedText>
-          )}
-        </ThemedView>
-      )}
-
-      {activeTab === "requests" && (
-        <ThemedView style={styles.section}>
-          {pendingRequests.length > 0 && (
-            <ThemedView>
-              <ThemedText type="subtitle" style={styles.subTitle}>
-                Lời mời nhận được
-              </ThemedText>
-              <FlatList
-                data={pendingRequests}
-                renderItem={renderRequestItem}
-                keyExtractor={(item) => item.id}
-                extraData={refresh}
-                scrollEnabled={false}
-              />
-            </ThemedView>
-          )}
-          {sentRequests.length > 0 && (
-            <ThemedView style={{ marginTop: 20 }}>
-              <ThemedText type="subtitle" style={styles.subTitle}>
-                Lời mời đã gửi
-              </ThemedText>
-              <FlatList
-                data={sentRequests}
-                renderItem={renderSentRequestItem}
-                keyExtractor={(item) => item.id}
-                extraData={refresh}
-                scrollEnabled={false}
-              />
-            </ThemedView>
-          )}
-          {pendingRequests.length === 0 && sentRequests.length === 0 && (
-            <ThemedText style={styles.emptyText}>
-              Không có lời mời nào
+              Bạn chưa theo dõi ai. Hãy tìm và theo dõi người dùng!
             </ThemedText>
           )}
         </ThemedView>
@@ -329,19 +295,37 @@ export default function FriendsScreen() {
 
       {activeTab === "add" && (
         <ThemedView style={styles.section}>
-          {suggestedUsers.length > 0 ? (
-            <FlatList
-              data={suggestedUsers}
-              renderItem={renderSuggestedUser}
-              keyExtractor={(item) => item.id}
-              extraData={refresh}
-              scrollEnabled={false}
+          <View style={styles.searchContainer}>
+            <TextInput
+              style={[
+                styles.emailInput,
+                {
+                  backgroundColor: Colors[colorScheme ?? "light"].background,
+                  color: Colors[colorScheme ?? "light"].text,
+                  borderColor: Colors[colorScheme ?? "light"].text,
+                },
+              ]}
+              placeholder="Nhập email để tìm kiếm"
+              placeholderTextColor={Colors[colorScheme ?? "light"].text + "80"}
+              value={emailQuery}
+              onChangeText={setEmailQuery}
+              keyboardType="email-address"
+              autoCapitalize="none"
             />
-          ) : (
+            <TouchableOpacity
+              onPress={handleSearchByEmail}
+              style={styles.searchButton}
+            >
+              <ThemedText style={styles.searchButtonText}>Tìm kiếm</ThemedText>
+            </TouchableOpacity>
+          </View>
+          {foundUser ? (
+            renderFoundUser()
+          ) : emailQuery && !foundUser ? (
             <ThemedText style={styles.emptyText}>
-              Không có gợi ý nào khác
+              Không tìm thấy người dùng với email này
             </ThemedText>
-          )}
+          ) : null}
         </ThemedView>
       )}
     </ScrollView>
@@ -392,9 +376,28 @@ const styles = StyleSheet.create({
   section: {
     padding: 16,
   },
-  subTitle: {
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  emailInput: {
+    flex: 1,
+    height: 40,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    marginRight: 8,
     fontSize: 16,
-    marginBottom: 12,
+  },
+  searchButton: {
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  searchButtonText: {
+    color: "#fff",
     fontWeight: "600",
   },
   friendItem: {
@@ -404,23 +407,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 8,
     backgroundColor: "#f9f9f9",
-  },
-  requestItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: 12,
-    marginBottom: 12,
-    borderRadius: 8,
-    backgroundColor: "#f0f8ff",
-  },
-  sentRequestItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 12,
-    marginBottom: 12,
-    borderRadius: 8,
-    backgroundColor: "#fffbf0",
   },
   suggestedItem: {
     flexDirection: "row",
@@ -436,11 +422,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     flex: 1,
   },
-  requestContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
   avatar: {
     width: 48,
     height: 48,
@@ -451,35 +432,23 @@ const styles = StyleSheet.create({
   friendInfo: {
     flex: 1,
   },
-  requestInfo: {
-    flex: 1,
-  },
   emailText: {
     fontSize: 12,
     color: "#999",
     marginTop: 2,
   },
-  pendingText: {
-    fontSize: 11,
-    color: "#FFA500",
-    marginTop: 4,
-    fontWeight: "500",
-  },
   removeButton: {
     padding: 8,
   },
   addButton: {
-    padding: 8,
-  },
-  requestButtons: {
     flexDirection: "row",
-    gap: 8,
-  },
-  acceptButton: {
+    alignItems: "center",
     padding: 8,
   },
-  rejectButton: {
-    padding: 8,
+  addButtonText: {
+    marginLeft: 6,
+    color: "#007AFF",
+    fontWeight: "600",
   },
   emptyText: {
     textAlign: "center",

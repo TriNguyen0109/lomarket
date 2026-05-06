@@ -1,6 +1,6 @@
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   FlatList,
@@ -14,7 +14,14 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
-import { confirmOrder, orders, products, removeProduct } from "@/data";
+import {
+  confirmOrder,
+  currentUser,
+  logoutUser,
+  orders,
+  products,
+  removeProduct,
+} from "@/data";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
 export default function ProfileScreen() {
@@ -171,18 +178,33 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleLogout = () => {
+    Alert.alert("Đăng xuất", "Bạn có chắc muốn đăng xuất?", [
+      { text: "Hủy", style: "cancel" },
+      {
+        text: "Đăng xuất",
+        style: "destructive",
+        onPress: async () => {
+          await logoutUser();
+          router.replace("/(auth)/login");
+        },
+      },
+    ]);
+  };
+
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Header với avatar và thông tin */}
       <View style={styles.header}>
         <Image
-          source={{ uri: "https://via.placeholder.com/150" }}
+          source={{
+            uri: currentUser?.avatar || "https://via.placeholder.com/150",
+          }}
           style={styles.avatar}
         />
         <ThemedText type="title" style={styles.name}>
-          Tên Người Dùng
+          {currentUser?.name || "Người dùng"}
         </ThemedText>
-        <ThemedText style={styles.bio}>Mô tả ngắn về người dùng</ThemedText>
       </View>
 
       {/* Nút tạo mới sản phẩm */}
@@ -266,6 +288,17 @@ export default function ProfileScreen() {
           scrollEnabled={false}
         />
       </ThemedView>
+
+      {/* Nút Đăng xuất */}
+      <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <IconSymbol
+          name="rectangle.portrait.and.arrow.right"
+          size={20}
+          color="#FF3B30"
+        />
+        <ThemedText style={styles.logoutText}>Đăng xuất</ThemedText>
+      </TouchableOpacity>
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 }
@@ -288,10 +321,6 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 24,
     marginBottom: 5,
-  },
-  bio: {
-    fontSize: 16,
-    textAlign: "center",
   },
   createButton: {
     flexDirection: "row",
@@ -404,5 +433,20 @@ const styles = StyleSheet.create({
     padding: 20,
     color: "#999999",
     fontStyle: "italic",
+  },
+  logoutButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 15,
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#FF3B30",
+    borderRadius: 8,
+  },
+  logoutText: {
+    color: "#FF3B30",
+    marginLeft: 8,
+    fontWeight: "600",
   },
 });

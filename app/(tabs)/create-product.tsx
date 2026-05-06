@@ -1,14 +1,18 @@
-import { CameraView, useCameraPermissions } from "expo-camera";
-import { Image as ExpoImage } from "expo-image";
+import {
+  CameraCapturedPicture,
+  CameraView,
+  useCameraPermissions,
+} from "expo-camera";
 import { useRouter } from "expo-router";
 import { useRef, useState } from "react";
 import {
-    Alert,
-    ScrollView,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
@@ -18,10 +22,11 @@ import { addProduct } from "@/data";
 
 export default function CreateProductScreen() {
   const [permission, requestPermission] = useCameraPermissions();
-  const [photo, setPhoto] = useState<string | null>(null);
+  const [photo, setPhoto] = useState<CameraCapturedPicture | null>(null);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [description, setDescription] = useState("");
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const cameraRef = useRef<any>(null);
   const router = useRouter();
 
@@ -43,9 +48,17 @@ export default function CreateProductScreen() {
   }
 
   const takePhoto = async () => {
-    if (cameraRef.current) {
+    if (!cameraRef.current || !isCameraReady) {
+      Alert.alert("Lỗi", "Camera chưa sẵn sàng. Vui lòng thử lại.");
+      return;
+    }
+
+    try {
       const photoData = await cameraRef.current.takePictureAsync();
-      setPhoto(photoData.uri);
+      setPhoto(photoData);
+    } catch (error) {
+      console.error("Failed to capture image", error);
+      Alert.alert("Lỗi", "Không thể chụp ảnh. Vui lòng thử lại.");
     }
   };
 
@@ -69,7 +82,7 @@ export default function CreateProductScreen() {
             discount: "0%",
             seller: "Bạn",
             sellerAvatar: "https://via.placeholder.com/50",
-            image: photo,
+            image: photo.uri,
             status: "available",
           };
 
@@ -82,7 +95,7 @@ export default function CreateProductScreen() {
           setPhoto(null);
 
           Alert.alert("Thành công", "Sản phẩm đã được tạo!");
-          router.push("/(tabs)");
+          router.replace("/(tabs)"); // Dùng replace để tránh quay lại form tạo sản phẩm
         },
       },
     ]);
@@ -96,16 +109,37 @@ export default function CreateProductScreen() {
 
       {!photo ? (
         <View style={styles.cameraContainer}>
-          <CameraView style={styles.camera} ref={cameraRef} />
+          <View style={styles.squarePreview}>
+            <CameraView
+              style={styles.camera}
+              ratio="1:1"
+              ref={cameraRef}
+              onCameraReady={() => setIsCameraReady(true)}
+              onMountError={(error) => {
+                console.error("Camera mount error", error);
+                setIsCameraReady(false);
+              }}
+            />
+          </View>
           <TouchableOpacity onPress={takePhoto} style={styles.captureButton}>
             <IconSymbol name="camera" size={30} color="#fff" />
           </TouchableOpacity>
         </View>
       ) : (
         <View style={styles.photoContainer}>
-          <ExpoImage source={{ uri: photo }} style={styles.capturedImage} />
+          <View style={styles.squarePreview}>
+            <Image
+              key={photo?.uri}
+              source={{ uri: photo?.uri }}
+              style={styles.capturedImage}
+              resizeMode="cover"
+            />
+          </View>
           <TouchableOpacity
-            onPress={() => setPhoto(null)}
+            onPress={() => {
+              setPhoto(null);
+              setIsCameraReady(false);
+            }}
             style={styles.retakeButton}
           >
             <ThemedText style={styles.retakeText}>Chụp lại</ThemedText>
@@ -168,10 +202,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  camera: {
+  squarePreview: {
     width: 300,
     height: 300,
     borderRadius: 10,
+    overflow: "hidden",
+    backgroundColor: "#000",
+  },
+  camera: {
+    width: "100%",
+    height: "100%",
   },
   captureButton: {
     backgroundColor: "#007AFF",
@@ -192,10 +232,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   capturedImage: {
-    width: 200,
-    height: 200,
-    borderRadius: 10,
-    marginBottom: 10,
+    width: "100%",
+    height: "100%",
   },
   retakeButton: {
     backgroundColor: "#FF3B30",
