@@ -1,12 +1,141 @@
-// Shared data for products
+﻿// Shared data for products
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Alert } from "react-native";
 
 export let authToken: string | null = null;
 export let currentUser: any = null;
-const API_URL = "http://192.168.1.58:8000"; // Thay bằng IP server Django của bạn (ví dụ: 192.168.1.100)
+const API_URL = "https://app.lomarket.id.vn"; // Thay bằng IP server Django của bạn (ví dụ: 192.168.1.100)
 const TOKEN_KEY = "authToken";
 const USER_KEY = "currentUser";
+
+const REQUEST_TIMEOUT_MS = 10000;
+
+const fetchWithTimeout = async (
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+) => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+const getNetworkErrorMessage = (error: unknown) => {
+  if (error instanceof Error && error.name === "AbortError") {
+    return "Kết nối server quá lâu. Vui lòng kiểm tra IP/port server.";
+  }
+
+  return "Lỗi kết nối đến server";
+};
+
+const getApiErrorMessage = (data: any, fallback: string) => {
+  if (!data) {
+    return fallback;
+  }
+
+  if (typeof data === "string") {
+    return data || fallback;
+  }
+
+  const firstError =
+    data.username?.[0] ||
+    data.email?.[0] ||
+    data.phone?.[0] ||
+    data.password?.[0] ||
+    data.password1?.[0] ||
+    data.password2?.[0] ||
+    data.non_field_errors?.[0] ||
+    data.detail;
+
+  if (firstError) {
+    return String(firstError);
+  }
+
+  const firstKey = Object.keys(data)[0];
+  const firstValue = firstKey ? data[firstKey] : null;
+
+  if (Array.isArray(firstValue) && firstValue[0]) {
+    return String(firstValue[0]);
+  }
+
+  return fallback;
+};
+
+export const resolveMediaUrl = (url?: string | null) => {
+  if (!url) {
+    return "https://www.svgrepo.com/show/508699/landscape-placeholder.svg";
+  }
+
+  if (
+    url.startsWith("http://") ||
+    url.startsWith("https://") ||
+    url.startsWith("data:") ||
+    url.startsWith("file:") ||
+    url.startsWith("blob:") ||
+    url.startsWith("content:")
+  ) {
+    return url;
+  }
+
+  return `${API_URL}${url.startsWith("/") ? "" : "/"}${url}`;
+};
+
+const getProductImageUrl = (product: any) =>
+  product?.image?.url ||
+  product?.image ||
+  product?.photo?.url ||
+  product?.photo ||
+  product?.image_url ||
+  product?.photo_url ||
+  product?.raw?.image?.url ||
+  product?.raw?.image ||
+  product?.raw?.photo?.url ||
+  product?.raw?.photo ||
+  "";
+
+const normalizeApiUser = (user: any) => ({
+  ...user,
+  id: String(user.id),
+  name: user.username || user.email || "Người dùng",
+  avatar:
+    user.avatar || "https://www.svgrepo.com/show/452030/avatar-default.svg",
+});
+
+export const clearAuthData = async () => {
+  authToken = null;
+  currentUser = null;
+  await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+};
+
+export const fetchCurrentUser = async () => {
+  if (!authToken) {
+    return null;
+  }
+
+  const headers = {
+    Accept: "application/json",
+    Authorization: `Token ${authToken}`,
+  };
+
+  for (const path of ["/api/me/", "/api/auth/user/"]) {
+    const response = await fetchWithTimeout(`${API_URL}${path}`, { headers });
+
+    if (response.ok) {
+      const user = await response.json();
+      return normalizeApiUser(user);
+    }
+  }
+
+  return null;
+};
 
 // Load token and user from storage
 export const loadAuthData = async () => {
@@ -19,10 +148,14 @@ export const loadAuthData = async () => {
     if (token) {
       authToken = token;
       console.log("✅ Token loaded successfully");
+    } else {
+      authToken = null;
     }
     if (user) {
       currentUser = JSON.parse(user);
       console.log("✅ User loaded successfully");
+    } else {
+      currentUser = null;
     }
   } catch (error) {
     console.error("Error loading auth data:", error);
@@ -111,6 +244,7 @@ export let products: any[] = [
     sold: "1.2k",
     discount: "30%",
     seller: "Người bán 11",
+    sellerId: "1",
     sellerAvatar:
       "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=100&q=80",
     image:
@@ -126,6 +260,7 @@ export let products: any[] = [
     sold: "2.5k",
     discount: "40%",
     seller: "Người bán 2",
+    sellerId: "2",
     sellerAvatar:
       "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=100&q=80",
     image:
@@ -141,6 +276,7 @@ export let products: any[] = [
     sold: "3.1k",
     discount: "25%",
     seller: "Người bán 3",
+    sellerId: "3",
     sellerAvatar:
       "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=100&q=80",
     image:
@@ -156,6 +292,7 @@ export let products: any[] = [
     sold: "1.8k",
     discount: "25%",
     seller: "Bạn",
+    sellerId: "me",
     sellerAvatar:
       "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=100&q=80",
     image:
@@ -170,6 +307,7 @@ export let products: any[] = [
     sold: "500",
     discount: "15%",
     seller: "Bạn",
+    sellerId: "me",
     sellerAvatar:
       "https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=100&q=80",
     image:
@@ -231,11 +369,35 @@ export const removeProduct = (id: string) => {
   products = products.filter((p) => p.id !== id);
 };
 
+const replaceApiProducts = (nextProducts: any[], predicate: (p: any) => boolean) => {
+  const localProducts = products.filter((product) => !predicate(product));
+  products = [...nextProducts, ...localProducts].filter(
+    (product, index, items) =>
+      items.findIndex((item) => item.id === product.id) === index,
+  );
+};
+
 export const addOrder = (order: any) => {
+  const existingOrder = orders.find(
+    (o) => o.productId === order.productId && o.status === "pending",
+  );
+
+  if (existingOrder) {
+    return false;
+  }
+
   orders.push(order);
-  // Update product status to pending
   const product = products.find((p) => p.id === order.productId);
-  if (product) product.status = "pending";
+  if (product) {
+    product.status = "pending";
+    return true;
+  }
+
+  if (order.productSnapshot) {
+    products.unshift({ ...order.productSnapshot, status: "pending" });
+  }
+
+  return true;
 };
 
 export const confirmOrder = (orderId: string) => {
@@ -249,6 +411,505 @@ export const confirmOrder = (orderId: string) => {
 
 export const getAvailableProducts = () =>
   products.filter((p) => p.status === "available");
+
+const parseVndPrice = (price: string | number) => {
+  if (typeof price === "number") {
+    return Math.floor(price);
+  }
+
+  const cleaned = String(price)
+    .trim()
+    .toLowerCase()
+    .replace(/vnd|vnđ|đ/g, "")
+    .replace(/\s/g, "");
+
+  if (!cleaned) {
+    return 0;
+  }
+
+  const decimalMatch = cleaned.match(/^(\d+)[.,](0{1,2})$/);
+  if (decimalMatch) {
+    return Number(decimalMatch[1]);
+  }
+
+  const digitsOnly = cleaned.replace(/\D/g, "");
+  return digitsOnly ? Number(digitsOnly) : 0;
+};
+
+const normalizePriceForApi = (price: string | number) =>
+  String(parseVndPrice(price));
+
+const productPriceOverrides = new Map<string, string>();
+
+export const formatPriceVnd = (price: string | number) => {
+  const priceNum = parseVndPrice(price);
+
+  if (priceNum === 0) {
+    return "0 vnđ";
+  }
+
+  return `${priceNum.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")} vnđ`;
+};
+
+export const isOwnProduct = (product: any) => {
+  const ownerId =
+    product?.sellerId ||
+    product?.userId ||
+    product?.ownerId ||
+    product?.raw?.user?.id ||
+    product?.raw?.user_id ||
+    product?.raw?.seller_id ||
+    product?.user?.id ||
+    product?.user;
+
+  if (currentUser?.id && ownerId) {
+    if (String(ownerId) === String(currentUser.id)) {
+      return true;
+    }
+  }
+
+  if (currentUser?.name && product?.seller) {
+    return String(product.seller).trim() === String(currentUser.name).trim();
+  }
+
+  return false;
+};
+
+const mapApiProduct = (
+  product: any,
+  options?: { isOwnProduct?: boolean; priceOverride?: string | number },
+) => {
+  const apiId = String(product.id);
+  const price =
+    options?.priceOverride ?? productPriceOverrides.get(apiId) ?? product.price;
+
+  return {
+    id: `api-product-${apiId}`,
+    apiId,
+    sellerId: String(
+      product.user?.id || product.user_id || product.seller_id || "",
+    ),
+    ownerId: String(
+      product.user?.id || product.user_id || product.seller_id || "",
+    ),
+    name: product.title,
+    price: normalizePriceForApi(price),
+    description: product.description || "",
+    sold: "0",
+    discount: "0%",
+    seller: product.seller || product.user?.username || "Người bán",
+    sellerAvatar:
+      product.user?.avatar ||
+      "https://www.svgrepo.com/show/452030/avatar-default.svg",
+    image: resolveMediaUrl(getProductImageUrl(product)),
+    status: product.status || "available",
+    isOwnProduct:
+      Boolean(options?.isOwnProduct) ||
+      Boolean(
+        currentUser?.id &&
+        product.user?.id &&
+        String(product.user.id) === String(currentUser.id),
+      ),
+    raw: product,
+  };
+};
+
+export const deleteProductAPI = async (product: any) => {
+  const apiId = product?.apiId || product?.raw?.id || product?.id;
+  if (
+    !apiId ||
+    (String(apiId).startsWith("api-product-") === false &&
+      !String(apiId).match(/^\d+$/))
+  ) {
+    return { success: false, error: "Không tìm thấy id sản phẩm trên server" };
+  }
+
+  const normalizedApiId = String(apiId).replace("api-product-", "");
+
+  try {
+    const response = await fetch(
+      `${API_URL}/api/products/${normalizedApiId}/`,
+      {
+        method: "DELETE",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Token ${authToken}`,
+        },
+      },
+    );
+
+    if (response.ok || response.status === 204) {
+      return { success: true };
+    }
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    return {
+      success: false,
+      error: data?.detail || `Xóa sản phẩm thất bại (${response.status})`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Network error",
+    };
+  }
+};
+
+export const getFollowedProductsAPI = async () => {
+  try {
+    const response = await fetch(`${API_URL}/api/followed-products/`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Token ${authToken}`,
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const results = Array.isArray(data) ? data : data.results || [];
+      const mappedProducts = results.map(mapApiProduct);
+      replaceApiProducts(mappedProducts, (product) => !isOwnProduct(product));
+      return { success: true, data: mappedProducts };
+    }
+
+    return {
+      success: false,
+      error: `Failed to fetch products (${response.status})`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Network error",
+    };
+  }
+};
+
+export const getMyProductsAPI = async () => {
+  try {
+    const response = await fetch(`${API_URL}/api/my-products/`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Token ${authToken}`,
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const results = Array.isArray(data) ? data : data.results || [];
+      const mappedProducts = results.map((product: any) =>
+        mapApiProduct(product, { isOwnProduct: true }),
+      );
+      replaceApiProducts(mappedProducts, isOwnProduct);
+      return { success: true, data: mappedProducts };
+    }
+
+    return {
+      success: false,
+      error: `Failed to fetch my products (${response.status})`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Network error",
+    };
+  }
+};
+
+export const createProductAPI = async (product: {
+  title: string;
+  description: string;
+  price: string;
+  image: string;
+}) => {
+  if (!authToken) {
+    return {
+      success: false,
+      error: "Không có token xác thực. Vui lòng đăng nhập lại.",
+    };
+  }
+
+  try {
+    const normalizedPrice = normalizePriceForApi(product.price);
+    const imageName = product.image.split("/").pop() || "product.jpg";
+    const imageType = imageName.toLowerCase().endsWith(".png")
+      ? "image/png"
+      : "image/jpeg";
+    const formData = new FormData();
+
+    formData.append("title", product.title);
+    formData.append("description", product.description);
+    formData.append("price", normalizedPrice);
+    formData.append("image", {
+      uri: product.image,
+      name: imageName,
+      type: imageType,
+    } as any);
+
+    const response = await fetch(`${API_URL}/api/products/`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Token ${authToken}`,
+      },
+      body: formData,
+    });
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      return {
+        success: false,
+        error: `Server trả về dữ liệu không hợp lệ (${response.status})`,
+      };
+    }
+
+    if (response.ok) {
+      if (data?.id) {
+        productPriceOverrides.set(String(data.id), normalizedPrice);
+      }
+
+      return {
+        success: true,
+        status: response.status,
+        data: mapApiProduct(data, {
+          isOwnProduct: true,
+          priceOverride: normalizedPrice,
+        }),
+      };
+    }
+
+    return {
+      success: false,
+      status: response.status,
+      error:
+        data?.detail ||
+        data?.error ||
+        `Không thể tạo sản phẩm (${response.status})`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Network error",
+    };
+  }
+};
+
+const mapApiOrder = (order: any) => {
+  const product = order.product || order.raw?.product || {};
+  const buyer = order.buyer || order.raw?.buyer || {};
+  const mappedProduct = mapApiProduct(product, {
+    isOwnProduct:
+      currentUser?.id && product.user?.id
+        ? String(product.user.id) === String(currentUser.id)
+        : false,
+  });
+
+  return {
+    id: `api-order-${order.id}`,
+    apiId: String(order.id),
+    productId: mappedProduct.id,
+    buyer: buyer.username || buyer.email || order.buyer || "Người mua",
+    buyerId: String(buyer.id || order.buyer_id || ""),
+    seller: mappedProduct.seller,
+    sellerId: String(
+      order.seller_id ||
+        order.sellerId ||
+        mappedProduct.sellerId ||
+        product.user_id ||
+        product.seller_id ||
+        product.user?.id ||
+        "",
+    ),
+    phone: order.phone || "",
+    address: order.address || "",
+    email: order.email || "",
+    status: order.status || "pending",
+    productSnapshot: mappedProduct,
+    raw: order,
+  };
+};
+
+export const getOrdersAPI = async () => {
+  if (!authToken) {
+    return { success: false, error: "Token xác thực mất hiệu lực" };
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/orders/`, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Token ${authToken}`,
+      },
+    });
+
+    if (!response.ok) {
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
+      return {
+        success: false,
+        error: data?.detail || `Không thể tải đơn hàng (${response.status})`,
+      };
+    }
+
+    const data = await response.json();
+    const results = Array.isArray(data) ? data : data.results || [];
+    const mappedOrders = results.map(mapApiOrder);
+
+    orders.length = 0;
+    orders.push(...mappedOrders);
+
+    const statusByProductId = new Map<string, string>();
+    for (const orderItem of mappedOrders) {
+      const currentStatus = statusByProductId.get(orderItem.productId);
+      if (!currentStatus || orderItem.status === "sold") {
+        statusByProductId.set(orderItem.productId, orderItem.status);
+      }
+    }
+
+    for (const product of products) {
+      const status = statusByProductId.get(product.id);
+      product.status = status || "available";
+    }
+
+    return { success: true, data: mappedOrders };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Network error",
+    };
+  }
+};
+
+export const createOrderAPI = async (product: any) => {
+  if (!authToken) {
+    return {
+      success: false,
+      error: "Không có token xác thực. Vui lòng đăng nhập lại.",
+    };
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/orders/`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Token ${authToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        product_id: String(
+          product.apiId || product.raw?.id || product.id,
+        ).replace(/^api-product-/, ""),
+        phone: currentUser?.phone || "",
+        address: currentUser?.address || "",
+        email: currentUser?.email || "",
+      }),
+    });
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      return {
+        success: false,
+        error: `Server trả về dữ liệu không hợp lệ (${response.status})`,
+      };
+    }
+
+    if (response.ok) {
+      const mapped = mapApiOrder(data);
+      const existingOrder = orders.find(
+        (o) => o.productId === mapped.productId && o.status === "pending",
+      );
+      if (!existingOrder) {
+        orders.push(mapped);
+      }
+
+      const productItem = products.find(
+        (p) => String(p.id) === String(mapped.productId),
+      );
+      if (productItem) {
+        productItem.status = "pending";
+      }
+
+      return { success: true, data: mapped };
+    }
+
+    return {
+      success: false,
+      error:
+        data?.detail ||
+        data?.error ||
+        `Không thể đặt hàng (${response.status})`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Network error",
+    };
+  }
+};
+
+export const confirmOrderAPI = async (orderId: string) => {
+  if (!authToken) {
+    return {
+      success: false,
+      error: "Không có token xác thực. Vui lòng đăng nhập lại.",
+    };
+  }
+
+  try {
+    const response = await fetch(`${API_URL}/api/orders/${orderId}/confirm/`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Token ${authToken}`,
+      },
+    });
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (response.ok) {
+      const mapped = mapApiOrder(data);
+      const index = orders.findIndex(
+        (o) => String(o.apiId) === String(mapped.apiId),
+      );
+      if (index !== -1) {
+        orders[index] = mapped;
+      }
+      return { success: true, data: mapped };
+    }
+
+    return {
+      success: false,
+      error:
+        data?.detail ||
+        data?.error ||
+        `Không thể xác nhận đơn (${response.status})`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Network error",
+    };
+  }
+};
 
 // Friends management functions
 export const sendFriendRequest = (userId: string) => {
@@ -325,7 +986,7 @@ export const getAllFriends = () => {
 
 export const loginUser = async (username: string, password: string) => {
   try {
-    const response = await fetch(`${API_URL}/api/auth/login/`, {
+    const response = await fetchWithTimeout(`${API_URL}/api/auth/login/`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -338,65 +999,83 @@ export const loginUser = async (username: string, password: string) => {
 
     const data = await response.json();
 
-    if (response.ok) {
-      // dj-rest-auth mặc định trả về { key: "token_của_bạn" }
-      // Nếu bạn dùng JWT, nó có thể là { access: "...", refresh: "..." }
-
-      // Tìm user trong danh sách local dựa trên username/email đã nhập
-      // Trong thực tế, bạn nên lấy thông tin này từ một API endpoint 'user profile' riêng
-      currentUser = users.find(
-        (u) => u.email === username || u.name === username,
-      ) || {
-        id: "me",
-        name: username,
-        avatar: "https://www.svgrepo.com/show/452030/avatar-default.svg",
-      };
-
-      authToken = data.key || data.access;
-      await saveAuthData();
-      return { success: true };
+    if (!response.ok) {
+      const errorMessage =
+        data.non_field_errors?.[0] || "Sai thông tin tài khoản hoặc mật khẩu";
+      await clearAuthData();
+      return { success: false, error: errorMessage };
     }
 
-    // Xử lý lỗi trả về từ Django (thường là object chứa thông tin lỗi)
-    const errorMessage = data.non_field_errors
-      ? data.non_field_errors[0]
-      : "Sai thông tin tài khoản hoặc mật khẩu";
+    await clearAuthData();
+    authToken = data.key || data.access;
+    currentUser = await fetchCurrentUser();
 
-    return { success: false, error: errorMessage };
+    if (!authToken || !currentUser) {
+      await clearAuthData();
+      return {
+        success: false,
+        error: "Không thể lấy thông tin người dùng",
+      };
+    }
+
+    await saveAuthData();
+    return { success: true };
   } catch (error) {
-    console.error("Login Error:", error); // Thêm dòng này để debug
-    return { success: false, error: "Lỗi kết nối đến server" };
+    console.error("Login Error:", error);
+    await clearAuthData();
+    return { success: false, error: getNetworkErrorMessage(error) };
   }
 };
 
 export const logoutUser = async () => {
-  console.log("🔄 logoutUser() called");
-  authToken = null;
-  currentUser = null;
-  console.log("📥 Calling saveAuthData()...");
-  await saveAuthData();
-  console.log("✅ logoutUser() completed");
+  const token = authToken;
+
+  if (token) {
+    try {
+      await fetch(`${API_URL}/api/auth/logout/`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          Authorization: `Token ${token}`,
+        },
+      });
+    } catch (error) {
+      console.log("Logout API error:", error);
+    }
+  }
+
+  await clearAuthData();
 };
 
 export const registerUser = async (
   username: string,
   email: string,
+  phone: string,
   password1: string,
   password2: string,
 ) => {
   try {
-    const response = await fetch(`${API_URL}/api/auth/registration/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPhone = phone.trim();
+
+    const response = await fetchWithTimeout(
+      `${API_URL}/api/auth/registration/`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          username: trimmedUsername,
+          email: trimmedEmail,
+          phone: trimmedPhone,
+          password1,
+          password2,
+        }),
       },
-      body: JSON.stringify({
-        username: username,
-        email: email,
-        password1: password1,
-        password2: password2,
-      }),
-    });
+    );
 
     const text = await response.text();
     let data: any = null;
@@ -406,32 +1085,41 @@ export const registerUser = async (
       data = { detail: text };
     }
 
-    if (response.ok) {
-      authToken = data.key || data.access || authToken;
-      currentUser = {
-        id: "me",
-        name: username,
-        email: email,
-        avatar: "https://www.svgrepo.com/show/452030/avatar-default.svg",
+    if (!response.ok) {
+      await clearAuthData();
+      return {
+        success: false,
+        error: getApiErrorMessage(data, "Dang ky khong thanh cong"),
       };
-      await saveAuthData();
-      return { success: true };
     }
 
-    const errorMessage =
-      data.username?.[0] ||
-      data.email?.[0] ||
-      data.password1?.[0] ||
-      data.password2?.[0] ||
-      data.non_field_errors?.[0] ||
-      data.detail ||
-      text ||
-      "Đăng ký không thành công";
+    authToken = data.key || data.access || data.token || authToken;
+    currentUser = data.user
+      ? normalizeApiUser(data.user)
+      : await fetchCurrentUser();
 
-    return { success: false, error: errorMessage };
+    if (!authToken || !currentUser) {
+      const loginResult = await loginUser(trimmedUsername, password1);
+      if (loginResult.success) {
+        return { success: true };
+      }
+    }
+
+    if (!authToken || !currentUser) {
+      await clearAuthData();
+      return {
+        success: false,
+        error:
+          "Dang ky thanh cong nhung chua dang nhap duoc. Vui long dang nhap lai.",
+      };
+    }
+
+    await saveAuthData();
+    return { success: true };
   } catch (error) {
     console.error("Register Error:", error);
-    return { success: false, error: "Lỗi kết nối đến server" };
+    await clearAuthData();
+    return { success: false, error: getNetworkErrorMessage(error) };
   }
 };
 

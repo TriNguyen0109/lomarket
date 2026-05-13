@@ -1,11 +1,11 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
-    Alert,
-    StyleSheet,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
@@ -46,7 +46,7 @@ export default function LoginScreen() {
 
         <TextInput
           style={styles.input}
-          placeholder="Tên đăng nhập / Email"
+          placeholder="Tên đăng nhập"
           placeholderTextColor="#999"
           value={username}
           onChangeText={setUsername}

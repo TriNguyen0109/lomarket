@@ -50,7 +50,14 @@ export default function FriendsScreen() {
     try {
       const friendsRes = await getFollowedUsersAPI();
       if (friendsRes.success) {
-        setLocalFriends(friendsRes.data);
+        setLocalFriends(
+          friendsRes.data.filter(
+            (friend: any, index: number, items: any[]) =>
+              items.findIndex(
+                (item) => String(item.id) === String(friend.id),
+              ) === index,
+          ),
+        );
       } else {
         console.log("Failed to fetch followed users:", friendsRes.error);
       }
@@ -84,7 +91,11 @@ export default function FriendsScreen() {
       if (res.success) {
         showAlert("Thành công", "Bạn đang theo dõi người dùng này.");
         if (foundUser) {
-          setLocalFriends((prev) => [...prev, foundUser]);
+          setLocalFriends((prev) =>
+            prev.some((friend) => String(friend.id) === String(foundUser.id))
+              ? prev
+              : [...prev, foundUser],
+          );
         }
         setRefresh((prev) => prev + 1);
       } else {
@@ -281,7 +292,7 @@ export default function FriendsScreen() {
             <FlatList
               data={localFriends}
               renderItem={renderFriendItem}
-              keyExtractor={(item) => String(item.id)}
+              keyExtractor={(item, index) => `${item.id}-${index}`}
               extraData={refresh}
               scrollEnabled={false}
             />

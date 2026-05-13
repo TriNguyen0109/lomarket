@@ -1,43 +1,50 @@
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
 import { useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
-import { addOrder } from "@/data";
+import {
+  createOrderAPI,
+  formatPriceVnd,
+  getOrdersAPI,
+  isOwnProduct,
+  resolveMediaUrl,
+} from "@/data";
 import ProductModal, { Product } from "./ProductModal";
 
 interface ProductCardProps {
   item: Product;
   height: number;
+  onPurchased?: (product: Product) => void;
 }
 
-export default function ProductCard({ item, height }: ProductCardProps) {
-  const router = useRouter();
+export default function ProductCard({
+  item,
+  height,
+  onPurchased,
+}: ProductCardProps) {
   const [modalVisible, setModalVisible] = useState(false);
   const showReadMore = item.description.length > 120;
 
   return (
-    <View style={[styles.cardPage, { minHeight: height }]}>
-      {/* Phần trên: Hiển thị ảnh sản phẩm lớn */}
+    <View style={[styles.cardPage, { height }]}>
       <View style={styles.cardTop}>
         <Image
-          source={{ uri: item.image }}
+          source={{ uri: resolveMediaUrl(item.image) }}
           style={styles.productImage}
           contentFit="cover"
         />
       </View>
-      {/* Phần dưới: Thông tin sản phẩm, giá, mô tả, nút mua, seller */}
+
       <View style={styles.cardBody}>
-        {/* Tên sản phẩm */}
         <ThemedText type="subtitle" style={styles.productName}>
           {item.name}
         </ThemedText>
-        {/* Giá sản phẩm (màu vàng nổi bật) */}
+
         <ThemedText type="defaultSemiBold" style={styles.productPrice}>
-          {item.price}
+          {formatPriceVnd(item.price)}
         </ThemedText>
-        {/* Mô tả sản phẩm */}
+
         <ThemedText
           style={styles.productDescription}
           numberOfLines={3}
@@ -45,6 +52,7 @@ export default function ProductCard({ item, height }: ProductCardProps) {
         >
           {item.description}
         </ThemedText>
+
         {showReadMore ? (
           <Pressable
             onPress={() => setModalVisible(true)}
@@ -56,26 +64,47 @@ export default function ProductCard({ item, height }: ProductCardProps) {
             <ThemedText style={styles.readMoreText}>Xem thêm</ThemedText>
           </Pressable>
         ) : null}
-        {/* Các nút hành động: Mua ngay và Chat với seller */}
+
         <View style={styles.productActions}>
           <Pressable
             onPress={() => {
+              if (isOwnProduct(item)) {
+                Alert.alert(
+                  "Không thể mua",
+                  "Bạn không thể mua sản phẩm của chính mình.",
+                );
+                return;
+              }
+
+              if (item.status && item.status !== "available") {
+                Alert.alert(
+                  "Không thể mua",
+                  "Sản phẩm này đang chờ xác nhận hoặc đã bán.",
+                );
+                return;
+              }
+
               Alert.alert("Xác nhận", "Bạn có chắc muốn mua sản phẩm này?", [
                 { text: "Hủy", style: "cancel" },
                 {
                   text: "Mua",
-                  onPress: () => {
-                    const order = {
-                      id: Date.now().toString(),
-                      productId: item.id,
-                      buyer: "Bạn",
-                      phone: "0123456789",
-                      address: "123 Đường ABC, Quận XYZ",
-                      zaloFb: "zalo/fb link",
-                      status: "pending",
-                    };
-                    addOrder(order);
-                    Alert.alert("Thành công", "Đã gửi yêu cầu mua!");
+                  onPress: async () => {
+                    const result = await createOrderAPI(item);
+                    if (!result.success) {
+                      Alert.alert(
+                        "Không thể mua",
+                        result.error ||
+                          "Sản phẩm này đang chờ xác nhận hoặc đã có đơn.",
+                      );
+                      return;
+                    }
+
+                    await getOrdersAPI();
+                    onPurchased?.(item);
+                    Alert.alert(
+                      "Thành công",
+                      "Đã gửi yêu cầu mua. Sản phẩm sẽ xuất hiện trong mục Sản phẩm đã mua với trạng thái chờ xác nhận.",
+                    );
                   },
                 },
               ]);
@@ -88,27 +117,18 @@ export default function ProductCard({ item, height }: ProductCardProps) {
           >
             <ThemedText type="defaultSemiBold">Mua ngay</ThemedText>
           </Pressable>
-          {/* <Pressable
-            onPress={() => {}}
-            android_ripple={{ color: "rgba(255,255,255,0.15)" }}
-            style={({ pressed }) => [
-              styles.buttonChat,
-              pressed && styles.buttonPressed,
-            ]}
-          >
-            <ThemedText type="defaultSemiBold">Chat</ThemedText>
-          </Pressable> */}
         </View>
-        {/* Thông tin người bán: Avatar hình tròn + Tên shop */}
+
         <View style={styles.sellerInfo}>
           <Image
-            source={{ uri: item.sellerAvatar }}
+            source={{ uri: resolveMediaUrl(item.sellerAvatar) }}
             style={styles.sellerAvatar}
             contentFit="cover"
           />
           <ThemedText style={styles.productSeller}>{item.seller}</ThemedText>
         </View>
       </View>
+
       <ProductModal
         item={item}
         visible={modalVisible}
@@ -118,31 +138,27 @@ export default function ProductCard({ item, height }: ProductCardProps) {
   );
 }
 
-// Định nghĩa các style cho component
 const styles = StyleSheet.create({
-  // ===== STYLE THẺ SẢN PHẨM =====
   cardPage: {
     borderRadius: 24,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
     overflow: "hidden",
-    backgroundColor: "#1a1a1a", // Nền đen nhẹ
+    backgroundColor: "#1a1a1a",
+    flexDirection: "column",
     marginBottom: 0,
   },
-
-  // ===== STYLE PHẦN ẢNH (TRÊN) =====
   cardTop: {
-    minHeight: 365,
+    flex: 1,
+    minHeight: 180,
     backgroundColor: "#333333",
   },
   productImage: {
     width: "100%",
-    aspectRatio: 1,
+    height: "100%",
     borderRadius: 20,
     backgroundColor: "#e2e8f0",
   },
-
-  // ===== STYLE PHẦN THÔNG TIN (DƯỚI) =====
   cardBody: {
     padding: 18,
   },
@@ -168,13 +184,6 @@ const styles = StyleSheet.create({
     color: "#cccccc",
     lineHeight: 22,
   },
-  productStats: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12,
-  },
-
-  // ===== STYLE CÁC NÚT HÀNH ĐỘNG =====
   productActions: {
     flexDirection: "row",
     gap: 12,
@@ -187,20 +196,10 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
   },
-  buttonChat: {
-    flex: 1,
-    backgroundColor: "#555555",
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   buttonPressed: {
     opacity: 0.7,
     transform: [{ scale: 0.98 }],
   },
-
-  // ===== STYLE THÔNG TIN NGƯỜI BÁN =====
   sellerInfo: {
     flexDirection: "row",
     alignItems: "center",

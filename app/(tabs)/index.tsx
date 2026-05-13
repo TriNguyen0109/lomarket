@@ -1,55 +1,119 @@
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useEffect, useState } from "react";
 import { FlatList, StyleSheet, useWindowDimensions } from "react-native";
 
 import ProductCard from "@/components/ProductCard";
 import { ThemedView } from "@/components/themed-view";
-import { getAvailableProducts } from "@/data";
+import {
+  getFollowedProductsAPI,
+  getMyProductsAPI,
+  getOrdersAPI,
+  isAuthenticated,
+  orders,
+} from "@/data";
 
-// Component màn hình chính - Hiển thị danh sách sản phẩm scroll theo trang
-// Mỗi trang là một sản phẩm (pagingEnabled = true)
 export default function HomeScreen() {
   const { height } = useWindowDimensions();
-  const [products, setProducts] = useState(getAvailableProducts());
+  const tabBarHeight = useBottomTabBarHeight();
+  const [products, setProducts] = useState<any[]>([]);
+  const cardHeight = Math.max(
+    420,
+    height - tabBarHeight - styles.screen.paddingTop,
+  );
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setProducts(getAvailableProducts());
-    }, 1000); // Check every second, not ideal but for demo
+    const loadProducts = async () => {
+      if (!isAuthenticated()) {
+        setProducts([]);
+        return;
+      }
+
+      const [followedResult, myProductsResult] = await Promise.all([
+        getFollowedProductsAPI(),
+        getMyProductsAPI(),
+        getOrdersAPI(),
+      ]);
+
+      if (followedResult.success || myProductsResult.success) {
+        const myProducts = myProductsResult.success
+          ? myProductsResult.data.filter(
+              (product: any) => product.status === "available",
+            )
+          : [];
+        const orderedProductIds = new Set(
+          orders
+            .filter(
+              (order) => order.status === "pending" || order.status === "sold",
+            )
+            .map((order) => order.productId),
+        );
+        const visibleFollowedProducts = (followedResult.success
+          ? followedResult.data
+          : []
+        ).filter(
+          (product: any) =>
+            product.status === "available" && !orderedProductIds.has(product.id),
+        );
+        const uniqueProducts = [
+          ...myProducts,
+          ...visibleFollowedProducts,
+        ].filter(
+          (product: any, index: number, items: any[]) =>
+            items.findIndex((item) => item.id === product.id) === index,
+        );
+        setProducts(uniqueProducts);
+      }
+    };
+
+    loadProducts();
+    const interval = setInterval(loadProducts, 5000);
 
     return () => clearInterval(interval);
   }, []);
 
   return (
     <ThemedView style={styles.screen}>
-      {/* FlatList: Danh sách sản phẩm cuộn theo trang (như Shopee) */}
       <FlatList
-        data={products} // Dữ liệu sản phẩm
-        keyExtractor={(item) => item.id} // Khóa duy nhất cho mỗi item
+        data={products}
+        keyExtractor={(item, index) => `${item.id}-${index}`}
         renderItem={({ item }) => (
-          <ProductCard item={item} height={height - 176} />
+          <ProductCard
+            item={item}
+            height={cardHeight}
+            onPurchased={(purchasedProduct) => {
+              setProducts((currentProducts) =>
+                currentProducts.filter(
+                  (product) => product.id !== purchasedProduct.id,
+                ),
+              );
+            }}
+          />
         )}
-        pagingEnabled // Bật chế độ cuộn theo trang
-        showsVerticalScrollIndicator={false} // Ẩn thanh cuộn
-        decelerationRate="fast" // Tốc độ cuộn nhanh
-        contentContainerStyle={styles.listContent}
+        style={styles.list}
+        pagingEnabled
+        snapToInterval={cardHeight}
+        snapToAlignment="start"
+        disableIntervalMomentum
+        getItemLayout={(_, index) => ({
+          length: cardHeight,
+          offset: cardHeight * index,
+          index,
+        })}
+        showsVerticalScrollIndicator={false}
+        decelerationRate="fast"
       />
     </ThemedView>
   );
 }
 
-// Định nghĩa các style cho component
 const styles = StyleSheet.create({
-  // ===== STYLE MÀN HÌNH CHÍNH =====
   screen: {
     flex: 1,
-    paddingTop: 80, // Tăng padding trên để tạo vùng trống như Locket
+    paddingTop: 80,
     paddingHorizontal: 16,
-    backgroundColor: "#000000", // Nền đen
+    backgroundColor: "#000000",
   },
   list: {
     flex: 1,
-  },
-  listContent: {
-    paddingBottom: 24,
   },
 });

@@ -1,10 +1,6 @@
-import {
-  CameraCapturedPicture,
-  CameraView,
-  useCameraPermissions,
-} from "expo-camera";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
   Image,
@@ -16,54 +12,41 @@ import {
 } from "react-native";
 
 import { ThemedText } from "@/components/themed-text";
-import { ThemedView } from "@/components/themed-view";
-import { IconSymbol } from "@/components/ui/icon-symbol";
-import { addProduct } from "@/data";
+import { addProduct, createProductAPI, formatPriceVnd } from "@/data";
 
 export default function CreateProductScreen() {
-  const [permission, requestPermission] = useCameraPermissions();
-  const [photo, setPhoto] = useState<CameraCapturedPicture | null>(null);
+  const [photoUri, setPhotoUri] = useState("");
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [description, setDescription] = useState("");
-  const [isCameraReady, setIsCameraReady] = useState(false);
-  const cameraRef = useRef<any>(null);
+  const [notice, setNotice] = useState("");
+  const [isBusy, setIsBusy] = useState(false);
   const router = useRouter();
 
-  if (!permission) {
-    return <View />;
-  }
-
-  if (!permission.granted) {
-    return (
-      <ThemedView style={styles.container}>
-        <ThemedText style={styles.message}>
-          Cần quyền truy cập camera để chụp ảnh sản phẩm.
-        </ThemedText>
-        <TouchableOpacity onPress={requestPermission} style={styles.button}>
-          <ThemedText style={styles.buttonText}>Cho phép truy cập</ThemedText>
-        </TouchableOpacity>
-      </ThemedView>
-    );
-  }
+  const handlePriceChange = (value: string) =>
+    setPrice(value.replace(/\D/g, ""));
 
   const takePhoto = async () => {
-    if (!cameraRef.current || !isCameraReady) {
-      Alert.alert("Lỗi", "Camera chưa sẵn sàng. Vui lòng thử lại.");
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Quyền camera", "Bạn chưa cấp quyền camera.");
       return;
     }
 
-    try {
-      const photoData = await cameraRef.current.takePictureAsync();
-      setPhoto(photoData);
-    } catch (error) {
-      console.error("Failed to capture image", error);
-      Alert.alert("Lỗi", "Không thể chụp ảnh. Vui lòng thử lại.");
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.6,
+      allowsEditing: false,
+    });
+
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      setPhotoUri(result.assets[0].uri);
+      setNotice("Đã chụp ảnh thành công.");
     }
   };
 
   const submitProduct = () => {
-    if (!photo || !name || !price || !description) {
+    if (!photoUri || !name.trim() || !price.trim() || !description.trim()) {
       Alert.alert("Lỗi", "Vui lòng điền đầy đủ thông tin và chụp ảnh.");
       return;
     }
@@ -72,80 +55,74 @@ export default function CreateProductScreen() {
       { text: "Hủy", style: "cancel" },
       {
         text: "Tạo",
-        onPress: () => {
-          const newProduct = {
-            id: Date.now().toString(),
-            name,
-            price,
-            description,
-            sold: "0",
-            discount: "0%",
-            seller: "Bạn",
-            sellerAvatar: "https://via.placeholder.com/50",
-            image: photo.uri,
-            status: "available",
-          };
+        onPress: async () => {
+          setIsBusy(true);
+          const res = await createProductAPI({
+            title: name.trim(),
+            description: description.trim(),
+            price: price.trim(),
+            image: photoUri,
+          });
+          setIsBusy(false);
 
-          addProduct(newProduct);
+          if (!res.success || !res.data) {
+            console.error("createProductAPI failed", res);
+            Alert.alert(
+              "Không thể đồng bộ sản phẩm",
+              res.error || "Tạo sản phẩm thất bại trên server.",
+            );
+            return;
+          }
 
-          // Reset form
+          addProduct(res.data);
           setName("");
           setPrice("");
           setDescription("");
-          setPhoto(null);
-
-          Alert.alert("Thành công", "Sản phẩm đã được tạo!");
-          router.replace("/(tabs)"); // Dùng replace để tránh quay lại form tạo sản phẩm
+          setPhotoUri("");
+          setNotice("Bạn có thể chụp ảnh mới.");
+          Alert.alert("Thành công", "Sản phẩm đã được tạo và đồng bộ.");
+          router.replace("/(tabs)");
         },
       },
     ]);
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+    >
       <ThemedText type="title" style={styles.title}>
         Tạo sản phẩm mới
       </ThemedText>
+      {notice ? (
+        <ThemedText style={styles.noticeText}>{notice}</ThemedText>
+      ) : null}
 
-      {!photo ? (
-        <View style={styles.cameraContainer}>
-          <View style={styles.squarePreview}>
-            <CameraView
-              style={styles.camera}
-              ratio="1:1"
-              ref={cameraRef}
-              onCameraReady={() => setIsCameraReady(true)}
-              onMountError={(error) => {
-                console.error("Camera mount error", error);
-                setIsCameraReady(false);
-              }}
-            />
-          </View>
-          <TouchableOpacity onPress={takePhoto} style={styles.captureButton}>
-            <IconSymbol name="camera" size={30} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={styles.photoContainer}>
-          <View style={styles.squarePreview}>
+      <View style={styles.cameraContainer}>
+        <View style={styles.squarePreview}>
+          {photoUri ? (
             <Image
-              key={photo?.uri}
-              source={{ uri: photo?.uri }}
+              source={{ uri: photoUri }}
               style={styles.capturedImage}
               resizeMode="cover"
             />
-          </View>
-          <TouchableOpacity
-            onPress={() => {
-              setPhoto(null);
-              setIsCameraReady(false);
-            }}
-            style={styles.retakeButton}
-          >
-            <ThemedText style={styles.retakeText}>Chụp lại</ThemedText>
-          </TouchableOpacity>
+          ) : (
+            <View style={styles.emptyState}>
+              <ThemedText>Chưa có ảnh</ThemedText>
+            </View>
+          )}
         </View>
-      )}
+        <TouchableOpacity
+          onPress={takePhoto}
+          style={styles.captureButton}
+          disabled={isBusy}
+        >
+          <ThemedText style={styles.captureText}>
+            {photoUri ? "Chụp lại" : "Chụp ảnh"}
+          </ThemedText>
+        </TouchableOpacity>
+      </View>
 
       <View style={styles.form}>
         <TextInput
@@ -156,20 +133,32 @@ export default function CreateProductScreen() {
         />
         <TextInput
           style={styles.input}
-          placeholder="Giá (VD: 100k)"
+          placeholder="Giá (VD: 100000)"
           value={price}
-          onChangeText={setPrice}
+          onChangeText={handlePriceChange}
+          keyboardType="number-pad"
         />
+        {price ? (
+          <ThemedText style={styles.pricePreview}>
+            Giá hiển thị: {formatPriceVnd(price)}
+          </ThemedText>
+        ) : null}
         <TextInput
-          style={styles.input}
+          style={[styles.input, styles.descriptionInput]}
           placeholder="Mô tả sản phẩm"
           value={description}
           onChangeText={setDescription}
           multiline
-          numberOfLines={4}
+          textAlignVertical="top"
         />
-        <TouchableOpacity onPress={submitProduct} style={styles.submitButton}>
-          <ThemedText style={styles.submitText}>Tạo sản phẩm</ThemedText>
+        <TouchableOpacity
+          onPress={submitProduct}
+          style={[styles.submitButton, isBusy && { opacity: 0.7 }]}
+          disabled={isBusy}
+        >
+          <ThemedText style={styles.submitText}>
+            {isBusy ? "Đang xử lý..." : "Tạo sản phẩm"}
+          </ThemedText>
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -177,31 +166,11 @@ export default function CreateProductScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 16,
-  },
-  title: {
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  message: {
-    textAlign: "center",
-    paddingBottom: 10,
-  },
-  button: {
-    backgroundColor: "#007AFF",
-    padding: 10,
-    borderRadius: 5,
-    alignSelf: "center",
-  },
-  buttonText: {
-    color: "#fff",
-  },
-  cameraContainer: {
-    alignItems: "center",
-    marginBottom: 20,
-  },
+  container: { flex: 1, padding: 16 },
+  contentContainer: { paddingBottom: 32 },
+  title: { textAlign: "center", marginBottom: 20 },
+  noticeText: { marginBottom: 12, textAlign: "center" },
+  cameraContainer: { alignItems: "center", marginBottom: 20 },
   squarePreview: {
     width: 300,
     height: 300,
@@ -209,44 +178,22 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     backgroundColor: "#000",
   },
-  camera: {
-    width: "100%",
-    height: "100%",
-  },
-  captureButton: {
-    backgroundColor: "#007AFF",
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  emptyState: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 20,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
+    backgroundColor: "#111",
   },
-  photoContainer: {
-    alignItems: "center",
-    marginBottom: 20,
+  capturedImage: { width: "100%", height: "100%" },
+  captureButton: {
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 12,
   },
-  capturedImage: {
-    width: "100%",
-    height: "100%",
-  },
-  retakeButton: {
-    backgroundColor: "#FF3B30",
-    padding: 10,
-    borderRadius: 5,
-    marginTop: 10,
-  },
-  retakeText: {
-    color: "#fff",
-  },
-  form: {
-    marginTop: 20,
-  },
+  captureText: { color: "#fff" },
+  form: { marginTop: 20 },
   input: {
     borderWidth: 1,
     borderColor: "#ccc",
@@ -254,14 +201,17 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 5,
   },
+  pricePreview: {
+    color: "#555",
+    marginBottom: 10,
+    marginTop: -4,
+  },
+  descriptionInput: { minHeight: 96 },
   submitButton: {
     backgroundColor: "#4CAF50",
     padding: 15,
     borderRadius: 5,
     alignItems: "center",
   },
-  submitText: {
-    color: "#fff",
-    fontSize: 16,
-  },
+  submitText: { color: "#fff", fontSize: 16 },
 });

@@ -13,6 +13,8 @@ export type Product = {
   seller: string;
   sellerAvatar: string;
   image: string;
+  status?: string;
+  isOwnProduct?: boolean;
 };
 
 interface ProductModalProps {

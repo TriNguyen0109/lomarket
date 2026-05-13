@@ -15,12 +15,18 @@ import { ThemedView } from "@/components/themed-view";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
 import {
-  confirmOrder,
+  confirmOrderAPI,
   currentUser,
+  deleteProductAPI,
+  formatPriceVnd,
+  getMyProductsAPI,
+  getOrdersAPI,
+  isOwnProduct,
   logoutUser,
   orders,
   products,
   removeProduct,
+  resolveMediaUrl,
 } from "@/data";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 
@@ -32,85 +38,135 @@ export default function ProfileScreen() {
   const [localOrders, setLocalOrders] = useState(orders);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLocalProducts([...products]);
-      setLocalOrders([...orders]);
-    }, 1000);
+    let isMounted = true;
 
-    return () => clearInterval(interval);
+    const refreshProfileData = async () => {
+      const [productsResult, ordersResult] = await Promise.all([
+        getMyProductsAPI(),
+        getOrdersAPI(),
+      ]);
+      if (isMounted) {
+        setLocalProducts(
+          productsResult.success ? productsResult.data : [...products],
+        );
+        setLocalOrders(ordersResult.success ? ordersResult.data : [...orders]);
+      }
+    };
+
+    refreshProfileData();
+    const interval = setInterval(refreshProfileData, 3000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
-  // Dữ liệu sản phẩm chưa bán của người dùng
   const unsoldProducts = localProducts.filter(
     (p) =>
-      p.seller === "Bạn" &&
-      (p.status === "available" || p.status === "pending"),
+      isOwnProduct(p) && (p.status === "available" || p.status === "pending"),
   );
 
-  // Dữ liệu sản phẩm đã bán của người dùng
   const soldProducts = localProducts.filter(
-    (p) => p.seller === "Bạn" && p.status === "sold",
+    (p) => isOwnProduct(p) && p.status === "sold",
   );
 
-  // Đơn mua hàng của người dùng (seller)
+  const getOrderProduct = (order: any) =>
+    order.productSnapshot ||
+    localProducts.find((p) => String(p.id) === String(order.productId));
+
   const sellerOrders = localOrders.filter((o) => {
-    const product = localProducts.find((p) => p.id === o.productId);
-    return product && product.seller === "Bạn";
+    if (currentUser?.id && o.sellerId) {
+      if (String(o.sellerId) === String(currentUser.id)) {
+        return true;
+      }
+    }
+
+    if (currentUser?.name && o.seller) {
+      if (String(o.seller).trim() === String(currentUser.name).trim()) {
+        return true;
+      }
+    }
+
+    const product = getOrderProduct(o);
+    return Boolean(product && isOwnProduct(product));
   });
 
-  // Sản phẩm người dùng mua
-  const buyerOrders = localOrders.filter((o) => o.buyer === "Bạn");
+  const buyerOrders = localOrders.filter(
+    (o) =>
+      String(o.buyerId) === String(currentUser?.id) ||
+      o.buyer === currentUser?.name ||
+      o.buyer === currentUser?.username ||
+      o.buyer === "Bạn",
+  );
 
   const handleDeleteProduct = (id: string) => {
     Alert.alert("Xác nhận", "Bạn có chắc muốn xóa sản phẩm này?", [
       { text: "Hủy", style: "cancel" },
       {
         text: "Xóa",
-        onPress: () => {
+        onPress: async () => {
+          const product = localProducts.find((p) => p.id === id);
+          if (!product) {
+            return;
+          }
+
+          const result = await deleteProductAPI(product);
+          if (!result.success) {
+            Alert.alert(
+              "Không thể xóa",
+              result.error || "Xóa sản phẩm thất bại",
+            );
+            return;
+          }
+
           removeProduct(id);
-          setRefresh(refresh + 1);
+          setLocalProducts([...products]);
+          setRefresh((prev) => prev + 1);
         },
       },
     ]);
   };
 
-  const renderUnsoldProduct = ({ item }: { item: any }) => {
-    return (
-      <ThemedView style={styles.unsoldProductItem}>
-        <View style={styles.unsoldProductContent}>
-          <Image
-            source={{ uri: item.image }}
-            style={styles.unsoldProductImage}
-          />
-          <View style={styles.unsoldProductInfo}>
-            <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-            <ThemedText>{item.price}</ThemedText>
-            <ThemedText style={styles.statusText}>
-              {item.status === "pending" ? "Chờ xác nhận" : "Có sẵn"}
-            </ThemedText>
-          </View>
+  const renderUnsoldProduct = ({ item }: { item: any }) => (
+    <ThemedView style={styles.unsoldProductItem}>
+      <View style={styles.unsoldProductContent}>
+        <Image
+          source={{ uri: resolveMediaUrl(item.image) }}
+          style={styles.unsoldProductImage}
+        />
+        <View style={styles.unsoldProductInfo}>
+          <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
+          <ThemedText>{formatPriceVnd(item.price)}</ThemedText>
+          <ThemedText style={styles.statusText}>
+            {item.status === "pending" ? "Chờ xác nhận" : "Có sẵn"}
+          </ThemedText>
         </View>
-        <TouchableOpacity
-          onPress={() => handleDeleteProduct(item.id)}
-          style={styles.deleteXButton}
-        >
-          <ThemedText style={styles.deleteXText}>X</ThemedText>
-        </TouchableOpacity>
-      </ThemedView>
-    );
-  };
+      </View>
+      <TouchableOpacity
+        onPress={() => handleDeleteProduct(item.id)}
+        style={styles.deleteXButton}
+      >
+        <ThemedText style={styles.deleteXText}>X</ThemedText>
+      </TouchableOpacity>
+    </ThemedView>
+  );
 
   const renderSoldProduct = ({ item }: { item: any }) => {
     const order = localOrders.find(
       (o) => o.productId === item.id && o.status === "sold",
     );
+
     return (
       <ThemedView style={styles.soldProductItem}>
         <View style={styles.soldProductContent}>
-          <Image source={{ uri: item.image }} style={styles.soldProductImage} />
+          <Image
+            source={{ uri: resolveMediaUrl(item.image) }}
+            style={styles.soldProductImage}
+          />
           <View style={styles.soldProductInfo}>
             <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-            <ThemedText>{item.price}</ThemedText>
+            <ThemedText>{formatPriceVnd(item.price)}</ThemedText>
             <ThemedText>Người mua: {order ? order.buyer : "N/A"}</ThemedText>
           </View>
         </View>
@@ -125,18 +181,20 @@ export default function ProfileScreen() {
   };
 
   const renderSellerOrder = ({ item }: { item: any }) => {
-    const product = products.find((p) => p.id === item.productId);
-    if (!product) return null;
+    const product = getOrderProduct(item);
 
     return (
       <ThemedView style={styles.orderItem}>
-        <ThemedText type="defaultSemiBold">{product.name}</ThemedText>
+        <ThemedText type="defaultSemiBold">
+          {product?.name || "Sản phẩm đã bị xóa"}
+        </ThemedText>
+        <ThemedText>{formatPriceVnd(product?.price || 0)}</ThemedText>
         <ThemedText>Người mua: {item.buyer}</ThemedText>
         {item.status === "pending" ? (
           <>
             <ThemedText>Số điện thoại: {item.phone}</ThemedText>
             <ThemedText>Địa chỉ: {item.address}</ThemedText>
-            <ThemedText>Zalo/Facebook: {item.zaloFb}</ThemedText>
+            <ThemedText>Email: {item.email || "Chưa cập nhật"}</ThemedText>
             <TouchableOpacity
               style={styles.confirmButton}
               onPress={() => {
@@ -144,9 +202,24 @@ export default function ProfileScreen() {
                   { text: "Hủy", style: "cancel" },
                   {
                     text: "Xác nhận",
-                    onPress: () => {
-                      confirmOrder(item.id);
-                      setRefresh(refresh + 1);
+                    onPress: async () => {
+                      const orderId =
+                        item.apiId ||
+                        item.raw?.id ||
+                        String(item.id).replace(/^api-order-/, "");
+                      const result = await confirmOrderAPI(orderId);
+
+                      if (!result.success) {
+                        Alert.alert(
+                          "Không thể xác nhận",
+                          result.error || "Xác nhận đơn hàng thất bại",
+                        );
+                        return;
+                      }
+
+                      setLocalProducts([...products]);
+                      setLocalOrders([...orders]);
+                      setRefresh((prev) => prev + 1);
                     },
                   },
                 ]);
@@ -156,24 +229,33 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </>
         ) : (
-          <ThemedText>Đã xác nhận</ThemedText>
+          <ThemedText>Đã bán</ThemedText>
         )}
       </ThemedView>
     );
   };
 
   const renderBuyerOrder = ({ item }: { item: any }) => {
-    const product = products.find((p) => p.id === item.productId);
+    const product = getOrderProduct(item);
     if (!product) return null;
 
     return (
       <ThemedView style={styles.orderItem}>
-        <ThemedText type="defaultSemiBold">{product.name}</ThemedText>
-        <ThemedText>Người bán: {product.seller}</ThemedText>
-        <ThemedText>
-          Trạng thái:{" "}
-          {item.status === "pending" ? "Chờ xác nhận" : "Đã xác nhận"}
-        </ThemedText>
+        <View style={styles.orderProductRow}>
+          <Image
+            source={{ uri: resolveMediaUrl(product.image) }}
+            style={styles.orderProductImage}
+          />
+          <View style={styles.orderProductInfo}>
+            <ThemedText type="defaultSemiBold">{product.name}</ThemedText>
+            <ThemedText>{formatPriceVnd(product.price)}</ThemedText>
+            <ThemedText>Người bán: {product.seller}</ThemedText>
+            <ThemedText>
+              Trạng thái:{" "}
+              {item.status === "pending" ? "Chờ xác nhận" : "Đã mua"}
+            </ThemedText>
+          </View>
+        </View>
       </ThemedView>
     );
   };
@@ -194,7 +276,6 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Header với avatar và thông tin */}
       <View style={styles.header}>
         <Image
           source={{
@@ -207,13 +288,12 @@ export default function ProfileScreen() {
         </ThemedText>
       </View>
 
-      {/* Nút tạo mới sản phẩm */}
       <TouchableOpacity
         style={[
           styles.createButton,
           { backgroundColor: Colors[colorScheme ?? "light"].tint },
         ]}
-        onPress={() => router.push("/(tabs)/create-product" as any)} // Giả sử có route này
+        onPress={() => router.push("/(tabs)/create-product" as any)}
       >
         <IconSymbol name="plus" size={20} color="#fff" />
         <ThemedText style={{ color: "#fff", marginLeft: 8 }}>
@@ -221,7 +301,6 @@ export default function ProfileScreen() {
         </ThemedText>
       </TouchableOpacity>
 
-      {/* Sản phẩm chưa bán */}
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle" style={styles.sectionTitle}>
           Sản phẩm chưa bán ({unsoldProducts.length})
@@ -230,7 +309,7 @@ export default function ProfileScreen() {
           <FlatList
             data={unsoldProducts}
             renderItem={renderUnsoldProduct}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
             extraData={refresh}
             scrollEnabled={false}
           />
@@ -241,7 +320,6 @@ export default function ProfileScreen() {
         )}
       </ThemedView>
 
-      {/* Đơn mua hàng */}
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle" style={styles.sectionTitle}>
           Đơn mua hàng
@@ -249,13 +327,12 @@ export default function ProfileScreen() {
         <FlatList
           data={sellerOrders}
           renderItem={renderSellerOrder}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
           extraData={refresh}
           scrollEnabled={false}
         />
       </ThemedView>
 
-      {/* Danh sách sản phẩm đã bán */}
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle" style={styles.sectionTitle}>
           Sản phẩm đã bán
@@ -264,7 +341,7 @@ export default function ProfileScreen() {
           <FlatList
             data={soldProducts}
             renderItem={renderSoldProduct}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
             extraData={refresh}
             scrollEnabled={false}
           />
@@ -275,7 +352,6 @@ export default function ProfileScreen() {
         )}
       </ThemedView>
 
-      {/* Sản phẩm người dùng mua */}
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle" style={styles.sectionTitle}>
           Sản phẩm đã mua
@@ -283,13 +359,12 @@ export default function ProfileScreen() {
         <FlatList
           data={buyerOrders}
           renderItem={renderBuyerOrder}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
           extraData={refresh}
           scrollEnabled={false}
         />
       </ThemedView>
 
-      {/* Nút Đăng xuất */}
       <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
         <IconSymbol
           name="rectangle.portrait.and.arrow.right"
@@ -304,24 +379,10 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    padding: 16,
-    backgroundColor: "#ffffff",
-  },
-  header: {
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 10,
-  },
-  name: {
-    fontSize: 24,
-    marginBottom: 5,
-  },
+  container: { padding: 16, backgroundColor: "#ffffff" },
+  header: { alignItems: "center", marginBottom: 20 },
+  avatar: { width: 100, height: 100, borderRadius: 50, marginBottom: 10 },
+  name: { fontSize: 24, marginBottom: 5 },
   createButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -330,42 +391,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 20,
   },
-  section: {
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    marginBottom: 10,
-  },
-  productItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 10,
-    marginRight: 10,
-    borderRadius: 8,
-    backgroundColor: "#f0f0f0",
-  },
-  productImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    marginRight: 10,
-  },
-  productInfo: {
-    flex: 1,
-  },
-  deleteButton: {
-    backgroundColor: "#FF3B30",
-    padding: 5,
-    borderRadius: 5,
-    alignSelf: "flex-end",
-  },
+  section: { marginBottom: 20 },
+  sectionTitle: { fontSize: 18, marginBottom: 10 },
   orderItem: {
     padding: 10,
     marginBottom: 10,
     borderRadius: 8,
     backgroundColor: "#f0f0f0",
   },
+  orderProductRow: { flexDirection: "row" },
+  orderProductImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    marginRight: 10,
+  },
+  orderProductInfo: { flex: 1 },
   confirmButton: {
     backgroundColor: "#4CAF50",
     padding: 8,
@@ -381,27 +422,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#f0f0f0",
   },
-  soldProductContent: {
-    flexDirection: "row",
-    flex: 1,
-  },
-  soldProductImage: {
-    width: 50,
-    height: 50,
-    borderRadius: 8,
-    marginRight: 10,
-  },
-  soldProductInfo: {
-    flex: 1,
-  },
-  deleteXButton: {
-    padding: 5,
-  },
-  deleteXText: {
-    fontSize: 18,
-    color: "#FF3B30",
-    fontWeight: "bold",
-  },
+  soldProductContent: { flexDirection: "row", flex: 1 },
+  soldProductImage: { width: 50, height: 50, borderRadius: 8, marginRight: 10 },
+  soldProductInfo: { flex: 1 },
+  deleteXButton: { padding: 5 },
+  deleteXText: { fontSize: 18, color: "#FF3B30", fontWeight: "bold" },
   unsoldProductItem: {
     flexDirection: "row",
     alignItems: "center",
@@ -410,24 +435,15 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: "#fff9e6",
   },
-  unsoldProductContent: {
-    flexDirection: "row",
-    flex: 1,
-  },
+  unsoldProductContent: { flexDirection: "row", flex: 1 },
   unsoldProductImage: {
     width: 50,
     height: 50,
     borderRadius: 8,
     marginRight: 10,
   },
-  unsoldProductInfo: {
-    flex: 1,
-  },
-  statusText: {
-    fontSize: 12,
-    color: "#FFA500",
-    fontWeight: "500",
-  },
+  unsoldProductInfo: { flex: 1 },
+  statusText: { fontSize: 12, color: "#FFA500", fontWeight: "500" },
   emptyText: {
     textAlign: "center",
     padding: 20,
@@ -444,9 +460,5 @@ const styles = StyleSheet.create({
     borderColor: "#FF3B30",
     borderRadius: 8,
   },
-  logoutText: {
-    color: "#FF3B30",
-    marginLeft: 8,
-    fontWeight: "600",
-  },
+  logoutText: { color: "#FF3B30", marginLeft: 8, fontWeight: "600" },
 });

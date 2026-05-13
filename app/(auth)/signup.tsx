@@ -16,13 +16,14 @@ import { registerUser } from "@/data";
 export default function SignupScreen() {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const handleSignup = async () => {
-    if (!username || !email || !password || !confirmPassword) {
+    if (!username || !email || !phone || !password || !confirmPassword) {
       Alert.alert("Lỗi", "Vui lòng nhập đầy đủ thông tin");
       return;
     }
@@ -36,6 +37,7 @@ export default function SignupScreen() {
     const result = await registerUser(
       username,
       email,
+      phone,
       password,
       confirmPassword,
     );
@@ -74,6 +76,14 @@ export default function SignupScreen() {
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Số điện thoại"
+            placeholderTextColor="#999"
+            value={phone}
+            onChangeText={setPhone}
+            keyboardType="phone-pad"
           />
           <TextInput
             style={styles.input}
