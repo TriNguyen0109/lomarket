@@ -1,4 +1,4 @@
-# Welcome to your Expo app 👋
+# Đường dẫn tải app (Android) https://expo.dev/accounts/nguyenminhtri/projects/lomarket/builds/f38ccd60-ac23-411e-8c5b-93379f229448
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
